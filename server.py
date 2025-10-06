@@ -7,7 +7,13 @@ from functions import (
     plot_correlation_heatmap,
     convert_to_long_format,
     run_enrichment_analysis,
-    create_horizontal_barplot
+    create_horizontal_barplot,
+    plot_top_combinations,
+    compute_distance_correlation_matrix,
+    cross_modal_harmony_embeddings_from_df,
+    convert_cross_modal_to_long,
+
+
 )
 from data import sc_samples, degs
 
@@ -79,11 +85,9 @@ def server(input, output, session):
                 choices=contrasts
             )
 
-    # Executar análise de enrichment
     @reactive.Effect
     @reactive.event(input.run_enrichment)
     def _():
-        # Validar inputs
         if (not input.degs_choice() or 
             not input.contrast_choice() or 
             not input.library_choice()):
@@ -96,10 +100,8 @@ def server(input, output, session):
                 p.set(i, message="Processing...")
                 reactive.flush()
             
-            # Obter a lista de genes
             gene_list = degs[input.degs_choice()][input.contrast_choice()]['gene']
             
-            # Executar enrichment analysis
             results = run_enrichment_analysis(
                 gene_list=gene_list,
                 libraries=input.library_choice(),
@@ -108,7 +110,6 @@ def server(input, output, session):
             
             enrichment_results.set(results)
 
-    # Tabela de resultados
     @output
     @render.data_frame
     def enrichment_table():
@@ -122,7 +123,6 @@ def server(input, output, session):
             )
         return None
 
-    # Gráfico de barras
     @output
     @render.plot
     def enrichment_plot():
@@ -131,7 +131,6 @@ def server(input, output, session):
             return create_horizontal_barplot(data)
         return None
 
-    # Download dos resultados
     @render.download(
         filename=lambda: f"enrichment_analysis_{input.degs_choice()}_{input.contrast_choice()}.csv"
     )
@@ -140,5 +139,78 @@ def server(input, output, session):
         if data is not None:
             csv_buffer = StringIO()
             data.to_csv(csv_buffer, index=False)
+            csv_buffer.seek(0)
+            yield csv_buffer.getvalue()
+    
+    cross_modal_results = reactive.Value(None)
+
+    @reactive.Effect
+    @reactive.event(input.run_cross_modal)
+    def _():
+        if not input.cross_modal_cancer() or not input.bulk_upload():
+            return None
+        
+        with ui.Progress(min=1, max=15) as p:
+            p.set(message="Processing cross-modal integration...", detail="This may take a while...")
+            
+            for i in range(1, 15):
+                p.set(i, message="Processing...")
+                reactive.flush()
+            
+            bulk_file = input.bulk_upload()[0]
+            bulk_df = pd.read_csv(bulk_file['datapath'], index_col=0)
+            
+            sc_data = sc_samples[input.cross_modal_cancer()]
+            
+            pseudo_h, bulk_h = cross_modal_harmony_embeddings_from_df(
+                df_pca=sc_data['df_pca'],
+                bulk_df=bulk_df,
+                scaler=sc_data['scaler'],  
+                pca=sc_data['pca'],       
+                hvg_genes=sc_data['hv_genes'],
+                sigma = 0.1
+            )
+            
+            dc_matrix, best_match = compute_distance_correlation_matrix(pseudo_h, bulk_h)
+            
+            cross_modal_results.set({
+                'matrix': dc_matrix,
+                'best_match': best_match
+            })
+
+    @output
+    @render.data_frame
+    def cross_modal_table():
+        data = cross_modal_results()
+        if data is not None:
+            matrix = data['matrix']
+            long_data = convert_cross_modal_to_long(matrix)
+            return render.DataTable(
+                long_data.round(5),
+                filters=True,
+                width="100%",
+                height="400px"
+            )
+        return None
+
+    @output
+    @render.plot
+    def cross_modal_plot():
+        data = cross_modal_results()
+        if data is not None:
+            matrix = data['matrix']
+            return plot_top_combinations(matrix, top_n=5)
+        return None
+
+    @render.download(
+        filename=lambda: f"cross_modal_integration_{input.cross_modal_cancer()}.csv"
+    )
+    def download_cross_modal():
+        data = cross_modal_results()
+        if data is not None:
+            matrix = data['matrix']
+            long_data = convert_cross_modal_to_long(matrix)
+            csv_buffer = StringIO()
+            long_data.to_csv(csv_buffer, index=False)
             csv_buffer.seek(0)
             yield csv_buffer.getvalue()

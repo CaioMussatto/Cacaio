@@ -6,6 +6,8 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import gseapy as gp
 import textwrap
+import harmonypy as hm
+
 
 def compare_centroids_distance_correlation_from_df(
     df: pd.DataFrame,
@@ -81,23 +83,18 @@ def convert_to_long_format(centroid_df):
     Converte o DataFrame wide para formato longo com colunas:
     CCLE, Primary Tumor, Distance Correlation
     """
-    # Reset index para transformar o índice em coluna
     long_df = centroid_df.reset_index()
     
-    # Verificar qual é o nome da coluna do índice
     index_col_name = long_df.columns[0]
     
-    # Fazer o melt usando o nome correto da coluna
     long_df = long_df.melt(
         id_vars=index_col_name, 
         var_name='Primary Tumor', 
         value_name='Distance Correlation'
     )
     
-    # Renomear a coluna do índice para 'CCLE'
     long_df = long_df.rename(columns={index_col_name: 'CCLE'})
     
-    # Remover valores NaN e ordenar por correlação
     long_df = long_df.dropna(subset=['Distance Correlation'])
     return long_df.sort_values('Distance Correlation', ascending=False)
 
@@ -147,16 +144,12 @@ def create_horizontal_barplot(df):
     """
     Create horizontal bar plot for enrichment results
     """
-    # Pegar os top 10 termos por Adjusted P-value
     top = df.sort_values('Adjusted P-value', ascending=True).head(10).copy()
     
-    # Calcular -log10(Adjusted P-value)
     top['-log10(Adjusted P-value)'] = -np.log10(top['Adjusted P-value'])
     
-    # Quebrar o texto da coluna 'Term' para ter no máximo 25 caracteres por linha
     top['Term_wrapped'] = top['Term'].apply(lambda x: '\n'.join(textwrap.wrap(x, width=25)))
     
-    # Criar o plot
     plt.figure(figsize=(8, 6))
     sns.barplot(
         data=top,
@@ -170,4 +163,151 @@ def create_horizontal_barplot(df):
     plt.yticks(fontsize=8, fontweight='bold', rotation=0)
     plt.ylabel('')
     plt.tight_layout()
+    return plt.gcf()
+
+
+def cross_modal_harmony_embeddings_from_df(
+    df_pca: pd.DataFrame,
+    bulk_df: pd.DataFrame,
+    scaler,
+    pca,
+    hvg_genes: list,
+    sample_col: str = 'sample',
+    theta: float = 0.0,
+    sigma: float = 0.2,
+    n_pcs: int = 50
+):
+    pc_cols = [f"PC{i+1}" for i in range(n_pcs)]
+    pseudo_centroids = df_pca.groupby(sample_col, observed=True)[pc_cols].mean()
+
+    bulk_mat = bulk_df.reindex(columns=hvg_genes, fill_value=0).values
+    bulk_pca = pca.transform(scaler.transform(bulk_mat))
+    bulk_pca_df = pd.DataFrame(bulk_pca, index=bulk_df.index, columns=pc_cols)
+
+    comb = pd.concat([pseudo_centroids, bulk_pca_df], axis=0)
+    batch = ['scRNA'] * len(pseudo_centroids) + ['bulk'] * len(bulk_pca_df)
+    meta = pd.DataFrame({'batch': batch}, index=comb.index)
+
+    n_clusters = pseudo_centroids.shape[0]
+
+    sigma_arr = np.full((n_clusters,), sigma)
+
+    ho = hm.run_harmony(
+        comb.values,
+        meta,
+        vars_use='batch',
+        theta=theta,
+        sigma=sigma_arr,
+        nclust=n_clusters,
+        verbose=False
+    )
+
+    Z = ho.Z_corr.T
+    harmony_cols = [f"HarmonyPC{i+1}" for i in range(n_pcs)]
+    emb_h = pd.DataFrame(Z, index=comb.index, columns=harmony_cols)
+
+    pseudo_h = emb_h.loc[pseudo_centroids.index]
+    bulk_h = emb_h.loc[bulk_pca_df.index]
+
+    return pseudo_h, bulk_h
+
+def compute_distance_correlation_matrix(pseudo_h: pd.DataFrame, bulk_h: pd.DataFrame):
+    """
+    Compute distance correlation between each bulk sample and each pseudo-bulk centroid
+    """
+    dcorr_df = pd.DataFrame(
+        index=bulk_h.index,
+        columns=pseudo_h.index,
+        dtype=float
+    )
+
+    for b in tqdm(bulk_h.index, desc="Calculating distance correlations"):
+        v_bulk = bulk_h.loc[b].values.astype(np.float64)
+        for p in pseudo_h.index:
+            v_pseudo = pseudo_h.loc[p].values.astype(np.float64)
+            try:
+                dc = dcor.distance_correlation(v_bulk, v_pseudo)
+            except Exception:
+                dc = np.nan
+            dcorr_df.at[b, p] = dc
+
+    best_match = {
+        b: (dcorr_df.loc[b].idxmax(), dcorr_df.loc[b].max())
+        for b in dcorr_df.index
+    }
+
+    return dcorr_df, best_match
+
+def convert_cross_modal_to_long(correlation_matrix):
+    """
+    Converte a matriz de correlação cross-modal para formato longo
+    """
+    long_df = correlation_matrix.reset_index()
+    index_col_name = long_df.columns[0]
+    
+    long_df = long_df.melt(
+        id_vars=index_col_name,
+        var_name='Pseudo_Centroid',
+        value_name='Distance_Correlation'
+    )
+    
+    long_df = long_df.rename(columns={index_col_name: 'Bulk_Sample'})
+    long_df = long_df.dropna(subset=['Distance_Correlation'])
+    return long_df.sort_values('Distance_Correlation', ascending=False)
+
+def plot_top_combinations(correlation_matrix, top_n=5):
+    """
+    Plot bar plot com as top N combinações usando paleta rocket
+    """
+    long_data = convert_cross_modal_to_long(correlation_matrix)
+    
+    top_combinations = long_data.nlargest(top_n, 'Distance_Correlation')
+    
+    labels = []
+    for _, row in top_combinations.iterrows():
+        bulk = row['Bulk_Sample']
+        pseudo = row['Pseudo_Centroid']
+        labels.append(f"{bulk}\nvs\n{pseudo}")
+    
+    # Criar o gráfico de barras com paleta rocket
+    plt.figure(figsize=(10, 8))
+    
+    # Usar a paleta rocket do seaborn
+    colors = sns.color_palette("rocket", len(top_combinations))
+    
+    bars = plt.barh(
+        labels,
+        top_combinations['Distance_Correlation'],
+        color=colors,
+        edgecolor='black',
+        linewidth=0.5,
+        alpha=0.9
+    )
+    
+    # Adicionar valores nas barras
+    for i, (bar, value) in enumerate(zip(bars, top_combinations['Distance_Correlation'])):
+        width = bar.get_width()
+        plt.text(width + 0.005, bar.get_y() + bar.get_height()/2, 
+                f'{value:.4f}', 
+                ha='left', va='center', 
+                fontweight='bold', 
+                fontsize=6,
+                bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.9))
+    
+    # Customizar o gráfico
+    plt.xlabel('Distance Correlation', fontsize=8, fontweight='bold')
+    plt.ylabel('Sample Combinations', fontsize=8, fontweight='bold')
+    plt.title(f'Top {top_n} Cross-Modal Correlations\n(Bulk Samples vs Pseudo Centroids)', 
+              fontsize=10, fontweight='bold')
+    plt.yticks(fontsize = 6)
+    # Adicionar linha de referência e grid
+    plt.axvline(x=0, color='grey', linewidth=0.8)
+    plt.grid(axis='x', alpha=0.3, linestyle='--')
+    
+    # Ajustar limites e layout
+    plt.xlim(0, min(1.0, top_combinations['Distance_Correlation'].max() * 1.15))
+    plt.gca().invert_yaxis()  # Maior valor no topo
+    
+    plt.tight_layout()
+    
     return plt.gcf()
