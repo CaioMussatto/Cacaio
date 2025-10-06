@@ -4,6 +4,8 @@ import dcor
 from tqdm import tqdm
 import seaborn as sns
 import matplotlib.pyplot as plt
+import gseapy as gp
+import textwrap
 
 def compare_centroids_distance_correlation_from_df(
     df: pd.DataFrame,
@@ -118,13 +120,54 @@ def plot_correlation_heatmap(centroid_matrix):
         yticklabels=True
     )
 
-    plt.xlabel("Tumor Samples", fontdict={'weight': 'bold'}, fontsize=22)
-    plt.ylabel("CCLE Samples", fontdict={'weight': 'bold'}, fontsize=22)
-    plt.xticks(fontsize=10, ha='right')
-    plt.yticks(fontsize=10)
+    plt.xlabel("Tumor Samples", fontdict={'weight': 'bold'}, fontsize=10)
+    plt.ylabel("CCLE Samples", fontdict={'weight': 'bold'}, fontsize=10)
+    plt.xticks(fontsize=8, ha='right')
+    plt.yticks(fontsize=8)
 
     cbar = ax.collections[0].colorbar
     cbar.ax.tick_params(labelsize=14)
-    cbar.set_label('Distance Correlation', fontsize=12, weight='bold')
+    cbar.set_label('Distance Correlation', fontsize=10, weight='bold')
 
     plt.tight_layout()
+    
+def run_enrichment_analysis(gene_list, libraries, organism='human'):
+    """
+    Run enrichment analysis using Enrichr
+    """
+    enr = gp.enrichr(
+        gene_list=gene_list, 
+        gene_sets=libraries,
+        organism=organism, 
+        outdir=None
+    )
+    return enr.results[['Term', 'Overlap', 'P-value', 'Combined Score', 'Adjusted P-value']]
+
+def create_horizontal_barplot(df):
+    """
+    Create horizontal bar plot for enrichment results
+    """
+    # Pegar os top 10 termos por Adjusted P-value
+    top = df.sort_values('Adjusted P-value', ascending=True).head(10).copy()
+    
+    # Calcular -log10(Adjusted P-value)
+    top['-log10(Adjusted P-value)'] = -np.log10(top['Adjusted P-value'])
+    
+    # Quebrar o texto da coluna 'Term' para ter no máximo 25 caracteres por linha
+    top['Term_wrapped'] = top['Term'].apply(lambda x: '\n'.join(textwrap.wrap(x, width=25)))
+    
+    # Criar o plot
+    plt.figure(figsize=(8, 6))
+    sns.barplot(
+        data=top,
+        x='-log10(Adjusted P-value)',
+        y='Term_wrapped',
+        dodge=False,
+        hue="Combined Score",
+        palette="rocket"
+    )
+    plt.xlabel(r'$-\log_{10}$ (Adjusted P-value)', fontsize=6, fontweight='bold')
+    plt.yticks(fontsize=8, fontweight='bold', rotation=0)
+    plt.ylabel('')
+    plt.tight_layout()
+    return plt.gcf()
