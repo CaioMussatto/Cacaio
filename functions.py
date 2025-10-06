@@ -240,7 +240,7 @@ def compute_distance_correlation_matrix(pseudo_h: pd.DataFrame, bulk_h: pd.DataF
 
 def convert_cross_modal_to_long(correlation_matrix):
     """
-    Converte a matriz de correlação cross-modal para formato longo
+    Converts the cross-modal correlation matrix to long format
     """
     long_df = correlation_matrix.reset_index()
     index_col_name = long_df.columns[0]
@@ -255,11 +255,15 @@ def convert_cross_modal_to_long(correlation_matrix):
     long_df = long_df.dropna(subset=['Distance_Correlation'])
     return long_df.sort_values('Distance_Correlation', ascending=False)
 
-def plot_top_combinations(correlation_matrix, top_n=5):
-    """
-    Plot bar plot com as top N combinações usando paleta rocket
-    """
+def plot_top_combinations(correlation_matrix, filter_type, sample_types, top_n=5):
     long_data = convert_cross_modal_to_long(correlation_matrix)
+    
+    long_data['sample_type'] = long_data['Pseudo_Centroid'].map(sample_types)
+    
+    if filter_type == "primary_tumor":
+        long_data = long_data[long_data['sample_type'] == 'primary_tumor']
+    elif filter_type == "cell_line":
+        long_data = long_data[long_data['sample_type'] == 'cell_line']
     
     top_combinations = long_data.nlargest(top_n, 'Distance_Correlation')
     
@@ -269,10 +273,8 @@ def plot_top_combinations(correlation_matrix, top_n=5):
         pseudo = row['Pseudo_Centroid']
         labels.append(f"{bulk}\nvs\n{pseudo}")
     
-    # Criar o gráfico de barras com paleta rocket
     plt.figure(figsize=(10, 8))
     
-    # Usar a paleta rocket do seaborn
     colors = sns.color_palette("rocket", len(top_combinations))
     
     bars = plt.barh(
@@ -284,7 +286,6 @@ def plot_top_combinations(correlation_matrix, top_n=5):
         alpha=0.9
     )
     
-    # Adicionar valores nas barras
     for i, (bar, value) in enumerate(zip(bars, top_combinations['Distance_Correlation'])):
         width = bar.get_width()
         plt.text(width + 0.005, bar.get_y() + bar.get_height()/2, 
@@ -294,19 +295,17 @@ def plot_top_combinations(correlation_matrix, top_n=5):
                 fontsize=6,
                 bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.9))
     
-    # Customizar o gráfico
     plt.xlabel('Distance Correlation', fontsize=8, fontweight='bold')
     plt.ylabel('Sample Combinations', fontsize=8, fontweight='bold')
     plt.title(f'Top {top_n} Cross-Modal Correlations\n(Bulk Samples vs Pseudo Centroids)', 
               fontsize=10, fontweight='bold')
-    plt.yticks(fontsize = 6)
-    # Adicionar linha de referência e grid
+    plt.yticks(fontsize=6)
+    
     plt.axvline(x=0, color='grey', linewidth=0.8)
     plt.grid(axis='x', alpha=0.3, linestyle='--')
     
-    # Ajustar limites e layout
     plt.xlim(0, min(1.0, top_combinations['Distance_Correlation'].max() * 1.15))
-    plt.gca().invert_yaxis()  # Maior valor no topo
+    plt.gca().invert_yaxis()
     
     plt.tight_layout()
     

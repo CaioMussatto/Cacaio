@@ -143,6 +143,7 @@ def server(input, output, session):
             yield csv_buffer.getvalue()
     
     cross_modal_results = reactive.Value(None)
+    sample_types_reactive = reactive.Value(None)
 
     @reactive.Effect
     @reactive.event(input.run_cross_modal)
@@ -168,15 +169,19 @@ def server(input, output, session):
                 scaler=sc_data['scaler'],  
                 pca=sc_data['pca'],       
                 hvg_genes=sc_data['hv_genes'],
-                sigma = 0.1
+                sigma=0.1
             )
             
             dc_matrix, best_match = compute_distance_correlation_matrix(pseudo_h, bulk_h)
+            
+            sample_to_ds = sc_data['df_pca'].drop_duplicates('sample').set_index('sample')['dataset']
+            sample_types = sample_to_ds.apply(lambda x: 'cell_line' if x == 'CCLE' else 'primary_tumor')
             
             cross_modal_results.set({
                 'matrix': dc_matrix,
                 'best_match': best_match
             })
+            sample_types_reactive.set(sample_types)
 
     @output
     @render.data_frame
@@ -197,9 +202,10 @@ def server(input, output, session):
     @render.plot
     def cross_modal_plot():
         data = cross_modal_results()
-        if data is not None:
+        sample_types = sample_types_reactive()
+        if data is not None and sample_types is not None:
             matrix = data['matrix']
-            return plot_top_combinations(matrix, top_n=5)
+            return plot_top_combinations(matrix, input.filter_type(), sample_types, top_n=5)
         return None
 
     @render.download(
