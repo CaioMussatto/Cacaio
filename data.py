@@ -1,11 +1,8 @@
 import joblib
 import gseapy as gp
 
-lung_model = joblib.load("Lung_model.pkl")
-lung_degs = joblib.load("DEGS_Lung.pkl")
+sc_samples = joblib.load('sc_samples.pkl')
 
-sc_samples = {"Lung": lung_model, "Pancreas": None}
-
-degs = {'Lung': lung_degs}
+degs = joblib.load('degs.pkl')
 
 libraries = gp.get_library_name(organism="Human")

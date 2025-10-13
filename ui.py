@@ -19,7 +19,7 @@ app_ui = ui.page_fluid(
             "Similarity Analysis",
             ui.layout_columns(
                 ui.card(
-                    ui.input_selectize(
+                    ui.input_select(
                         "dataset_choice",
                         "Select Dataset:",
                         choices=list(sc_samples.keys()),
@@ -45,26 +45,25 @@ app_ui = ui.page_fluid(
             ui.layout_columns(
                 ui.card(
                     ui.layout_columns(
-                        ui.input_selectize(
+                        ui.input_select(
                             "degs_choice",
                             "DEGs Dataset:",
                             choices=list(degs.keys()),
                             multiple=False
                         ),
-                        ui.input_selectize(
+                        ui.input_select(
                             "contrast_choice", 
                             "Contrast:",
                             choices=[],
                             multiple=False
                         ),
-                        ui.input_selectize(
+                        ui.input_select(
                             "library_choice",
                             "Libraries:",
                             choices=libraries,
                             multiple=False
                         ),
                         col_widths=[4, 4, 4],
-                        gap="10px"
                     ),
                 ),
                 ui.input_action_button("run_enrichment", "Run Enrichment", width="100%", class_="btn-custom-height"),
@@ -85,7 +84,7 @@ app_ui = ui.page_fluid(
             "Cross-Modal Integration", 
             ui.layout_columns(
                 ui.card(
-                    ui.input_selectize(
+                    ui.input_select(
                         "cross_modal_cancer",
                         "Cancer Dataset:",
                         choices=list(sc_samples.keys()),
@@ -112,7 +111,7 @@ app_ui = ui.page_fluid(
                                 gear_fill,
                                 style="position:absolute; top: 5px; right: 7px; cursor: pointer;",
                             ),
-                            ui.input_selectize(
+                            ui.input_select(
                                 "filter_type",
                                 "Filter Combinations:",
                                 choices={
